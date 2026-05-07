@@ -1,0 +1,12 @@
+# Run serp_collect_scheduled.sh once per day at 06:00 local time (calendar day).
+# This is often easier than “exactly every 86400 seconds” — pick one: cron OR launchd, not both.
+#
+#   crontab -e
+#   (paste one line, fix paths)
+
+0 6 * * * /Users/battulamonika/serp-prototype/scripts/serp_collect_scheduled.sh
+
+# Logs: serp-prototype/out/logs/serp_scheduled.log
+
+# True 24-hour interval from macOS (86400 seconds) — use LaunchAgent instead:
+#   bash scripts/install_launchagent_macos.sh

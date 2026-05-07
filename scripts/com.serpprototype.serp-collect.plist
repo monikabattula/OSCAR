@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS LaunchAgent: run serp_collect_scheduled.sh every 86400 seconds (24 hours).
+
+  1. Replace PROJECT_ROOT with your absolute path to serp-prototype (three places below).
+  2. Copy to ~/Library/LaunchAgents/com.serpprototype.serp-collect.plist
+  3. launchctl load ~/Library/LaunchAgents/com.serpprototype.serp-collect.plist
+
+  Stop: launchctl unload ~/Library/LaunchAgents/com.serpprototype.serp-collect.plist
+
+  Logs: PROJECT_ROOT/out/logs/launchd.out.log and launchd.err.log
+        (script also appends to PROJECT_ROOT/out/logs/serp_scheduled.log)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.serpprototype.serp-collect</string>
+
+  <key>WorkingDirectory</key>
+  <string>PROJECT_ROOT</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>PROJECT_ROOT/scripts/serp_collect_scheduled.sh</string>
+  </array>
+
+  <!-- Run every 86400 seconds (24 hours) from the last start time -->
+  <key>StartInterval</key>
+  <integer>86400</integer>
+
+  <!-- Also run once when you load the agent (optional; set false to wait 24h first) -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>PROJECT_ROOT/out/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>PROJECT_ROOT/out/logs/launchd.err.log</string>
+
+  <key>Nice</key>
+  <integer>5</integer>
+</dict>
+</plist>

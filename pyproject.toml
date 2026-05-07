@@ -1,0 +1,27 @@
+[project]
+name = "serp-prototype"
+version = "0.1.0"
+description = "OSCAR — Open Source Corpus Analysis & Research: collect SERPs to CSV, manage corpora, optional scrape & scheduling."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.27,<1",
+  "duckduckgo-search>=6.3,<8",
+  "typer>=0.12,<1",
+  "python-dotenv>=1.0,<2",
+  "pandas>=2.0,<3",
+  "streamlit>=1.40,<2",
+  "trafilatura>=1.12,<3",
+  "google-generativeai>=0.8,<1",
+]
+
+[project.scripts]
+serp-collect = "serp_prototype.cli:app"
+serp-dashboard = "serp_prototype.dashboard_launcher:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
