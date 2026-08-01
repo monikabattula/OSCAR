@@ -152,6 +152,25 @@ OSCAR_CSS = """
         text-align: center;
     }
     .oscar-engines-note { font-size: 0.8rem; color: #6b7280; margin-top: 0.3rem; }
+    .st-key-engine_google label,
+    .st-key-engine_reddit label,
+    .st-key-engine_ddg label,
+    .st-key-engine_google label p,
+    .st-key-engine_reddit label p,
+    .st-key-engine_ddg label p {
+        color: #374151 !important;
+        font-weight: 500 !important;
+    }
+    .st-key-engine_google label[data-baseweb="checkbox"] > div:first-child,
+    .st-key-engine_reddit label[data-baseweb="checkbox"] > div:first-child,
+    .st-key-engine_ddg label[data-baseweb="checkbox"] > div:first-child {
+        background-color: #d1d5db !important;
+    }
+    .st-key-engine_google label[data-baseweb="checkbox"]:has(input:checked) > div:first-child,
+    .st-key-engine_reddit label[data-baseweb="checkbox"]:has(input:checked) > div:first-child,
+    .st-key-engine_ddg label[data-baseweb="checkbox"]:has(input:checked) > div:first-child {
+        background-color: #6b7280 !important;
+    }
     .st-key-search_query [data-baseweb="input"] {
         border-radius: 16px !important;
         border: 1px solid #e5e7eb !important;
@@ -247,6 +266,7 @@ def _scheduled_tick() -> None:
             output_csv=sch.output_csv,
             append=True,
             dedupe=sch.dedupe_urls,
+            ddg_reddit_site_boost=sch.ddg_reddit_site_boost,
         )
     except Exception as e:
         st.session_state["_sched_last"] = f"Schedule error: {e}"
@@ -326,11 +346,11 @@ OSCAR (**Open Source Corpus Analysis & Research**) is a research collection app 
 
         c1, c2, c3 = st.columns(3)
         with c1:
-            use_google = st.toggle("Google", value=st.session_state.get("tg", False))
+            use_google = st.toggle("Google", value=st.session_state.get("tg", False), key="engine_google")
         with c2:
-            use_reddit = st.toggle("Reddit", value=st.session_state.get("tr", False))
+            use_reddit = st.toggle("Reddit", value=st.session_state.get("tr", False), key="engine_reddit")
         with c3:
-            use_ddg = st.toggle("DuckDuckGo", value=st.session_state.get("td", True))
+            use_ddg = st.toggle("DuckDuckGo", value=st.session_state.get("td", True), key="engine_ddg")
         st.session_state.update(tg=use_google, td=use_ddg, tr=use_reddit)
         st.markdown('<div class="oscar-engines-note">Select one or more engines</div>', unsafe_allow_html=True)
 
@@ -377,6 +397,16 @@ OSCAR (**Open Source Corpus Analysis & Research**) is a research collection app 
             with c_opt2:
                 fast_ret = st.toggle("Fast retrieval mode", value=False)
             st.caption("Turn OFF hard filter to maximize returned rows.")
+            ddg_reddit_boost = st.checkbox(
+                "Add `site:reddit.com` pass (DuckDuckGo)",
+                value=st.session_state.get("_ddg_reddit_boost", False),
+                help=(
+                    "Runs DuckDuckGo twice for DDG: once for the open web and once with "
+                    "`site:reddit.com`. Without this, Reddit thread URLs rarely appear."
+                ),
+                key="ddg_reddit_boost_cb",
+            )
+            st.session_state["_ddg_reddit_boost"] = ddg_reddit_boost
 
         if st.button("Run search", type="primary", use_container_width=True):
             if not engines:
@@ -399,12 +429,14 @@ OSCAR (**Open Source Corpus Analysis & Research**) is a research collection app 
                             dedupe=False,
                             strict_relevance=bool(strict_rel),
                             fast_retrieval=bool(fast_ret),
+                            ddg_reddit_site_boost=bool(ddg_reddit_boost),
                         )
                     except Exception as e:
                         st.exception(e)
                     else:
                         st.session_state["_last_query"] = q.strip()
                         st.session_state["_last_output_csv"] = out_csv
+                        st.session_state["_last_max_results"] = int(max_n)
                         outp = Path(out_csv)
                         if not outp.is_absolute():
                             outp = (ROOT / outp).resolve()
@@ -512,16 +544,36 @@ OSCAR (**Open Source Corpus Analysis & Research**) is a research collection app 
                 st.caption(
                     "HTTP fetch + **trafilatura** extraction → `out/scraped/`; scrape columns updated in memory."
                 )
+                latest_q = str(st.session_state.get("_last_query", "")).strip()
+                scrape_scope_df = df
+                if latest_q and "search_query" in df.columns:
+                    qmask = df["search_query"].astype(str).str.strip() == latest_q
+                    scrape_scope_df = df.loc[qmask]
+                eligible_unscraped = 0
+                if "url" in scrape_scope_df.columns and "scraped_text_relative_path" in scrape_scope_df.columns:
+                    eligible_unscraped = int(
+                        (
+                            scrape_scope_df["url"].astype(str).str.startswith("http")
+                            & scrape_scope_df["scraped_text_relative_path"].astype(str).str.strip().eq("")
+                        ).sum()
+                    )
+                preferred_scrape_n = int(st.session_state.get("_last_max_results", 25))
+                if eligible_unscraped <= 0:
+                    default_scrape_n = 0
+                else:
+                    default_scrape_n = min(max(1, preferred_scrape_n), eligible_unscraped, 100)
                 max_scrape = st.number_input(
                     "Max pages to scrape (unscraped rows, top-down)",
                     min_value=0,
                     max_value=100,
-                    value=5,
+                    value=default_scrape_n,
                     step=1,
                 )
-                latest_q = str(st.session_state.get("_last_query", "")).strip()
                 if latest_q:
-                    st.caption(f"Scraping is locked to current query: `{latest_q}`")
+                    st.caption(
+                        f"Scraping is locked to current query: `{latest_q}` "
+                        f"(unscraped rows available: {eligible_unscraped})."
+                    )
                 else:
                     st.caption("Run a search first to lock scraping to that query.")
                 col_s1, col_s2 = st.columns(2)
@@ -600,6 +652,11 @@ OSCAR (**Open Source Corpus Analysis & Research**) is a research collection app 
                 sch_max = st.number_input("Scheduled max results / engine", 1, 100, int(sch.max_results), key="sch_n")
                 sch_out = st.text_input("Scheduled output CSV", sch.output_csv, key="sch_o")
                 sch_dedupe = st.checkbox("Dedupe URLs on scheduled runs", value=sch.dedupe_urls, key="sch_d")
+                sch_ddg_rb = st.checkbox(
+                    "Scheduled: add `site:reddit.com` pass",
+                    value=sch.ddg_reddit_site_boost,
+                    key="sch_rb",
+                )
 
                 if st.button("Save schedule"):
                     nxt = sch.next_run_utc
@@ -615,6 +672,7 @@ OSCAR (**Open Source Corpus Analysis & Research**) is a research collection app 
                         max_results=int(sch_max),
                         output_csv=sch_out.strip() or "out/dashboard_results.csv",
                         dedupe_urls=bool(sch_dedupe),
+                        ddg_reddit_site_boost=bool(sch_ddg_rb),
                         next_run_utc=nxt,
                     )
                     save_schedule(ROOT, ns)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pandas as pd
 
@@ -39,7 +40,6 @@ def parse_period_inputs(
         "month": TimePeriod.PAST_MONTH,
         "year": TimePeriod.PAST_YEAR,
         "custom": TimePeriod.CUSTOM,
-        
     }
     if p not in mapping:
         raise ValueError(f"Unknown period {period!r}")
@@ -106,8 +106,32 @@ def _filter_and_rank_relevance(hits: list, query: str) -> list:
 
 
 def _is_reddit_url(url: str) -> bool:
-    u = (url or "").lower()
-    return "reddit.com/r/" in u or "redd.it/" in u
+    raw = (url or "").strip().lower()
+    if not raw:
+        return False
+    try:
+        host = (urlparse(raw).hostname or "").lower()
+    except Exception:
+        host = ""
+    if host == "redd.it" or host.endswith(".redd.it"):
+        return True
+    if host == "reddit.com" or host.endswith(".reddit.com"):
+        return True
+    return False
+
+
+def _merge_hits_by_url(primary: list, secondary: list) -> list:
+    """Preserve order: primary first, then secondary; drop duplicate URLs (case-insensitive)."""
+    seen: set[str] = set()
+    out: list = []
+    for h in primary + secondary:
+        u = (getattr(h, "url", "") or "").strip().lower()
+        if u:
+            if u in seen:
+                continue
+            seen.add(u)
+        out.append(h)
+    return out
 
 
 def run_search_job(
@@ -124,6 +148,7 @@ def run_search_job(
     dedupe: bool,
     strict_relevance: bool = True,
     fast_retrieval: bool = True,
+    ddg_reddit_site_boost: bool = False,
 ) -> tuple[list[str], int]:
     """Run one or more engines and write CSV (full schema). Returns (log lines, total rows written)."""
     logs: list[str] = []
@@ -152,8 +177,39 @@ def run_search_job(
         except ValueError as e:
             logs.append(f"{eng}: {e}")
             continue
+        raw_q = query.strip()
+        merge_note = ""
         try:
-            hits = backend.search(query, tp, date_start=ds, date_end=de, max_results=effective_max)
+            if (
+                se is SearchEngine.DUCKDUCKGO
+                and ddg_reddit_site_boost
+                and "site:reddit" not in raw_q.lower()
+            ):
+                hits_main = backend.search(
+                    raw_q, tp, date_start=ds, date_end=de, max_results=effective_max
+                )
+                hits_site: list = []
+                try:
+                    hits_site = backend.search(
+                        f"site:reddit.com {raw_q}",
+                        tp,
+                        date_start=ds,
+                        date_end=de,
+                        max_results=effective_max,
+                    )
+                except Exception as e_site:
+                    logs.append(
+                        f"{eng}: Reddit `site:reddit.com` pass failed ({str(e_site).strip()}); "
+                        "using main DuckDuckGo results only."
+                    )
+                hits = _merge_hits_by_url(hits_main, hits_site)
+                if len(hits) > effective_max:
+                    hits = hits[:effective_max]
+                merge_note = (
+                    f" merged main + site:reddit.com ({len(hits_main)}+{len(hits_site)} raw → {len(hits)} unique)"
+                )
+            else:
+                hits = backend.search(raw_q, tp, date_start=ds, date_end=de, max_results=effective_max)
         except Exception as e:
             msg = str(e).strip()
             if "Ratelimit" in msg or "202" in msg:
@@ -221,7 +277,7 @@ def run_search_job(
             total_written += w_total
             logs.append(
                 f"{eng}: wrote {w_total} row(s); skipped {sk_total} duplicate URL(s)"
-                f"{note}; reddit-thread rows tagged as `reddit_via_duckduckgo` → {outp}"
+                f"{merge_note}{note}; reddit-thread rows tagged as `reddit_via_duckduckgo` → {outp}"
             )
         else:
             w, sk = write_hits_csv(
@@ -233,7 +289,7 @@ def run_search_job(
                 dedupe_by_url=dedupe,
             )
             total_written += w
-            logs.append(f"{eng}: wrote {w} row(s); skipped {sk} duplicate URL(s){note} → {outp}")
+            logs.append(f"{eng}: wrote {w} row(s); skipped {sk} duplicate URL(s){merge_note}{note} → {outp}")
     return logs, total_written
 
 
@@ -255,16 +311,22 @@ def scrape_dataframe_urls(
     """Scrape up to max_pages rows that have a URL and no scraped file yet."""
     df = df.copy()
     df = normalize_df_columns(df)
+    # Keep scrape-tracking columns as text to avoid dtype warnings when writing strings.
+    for col in ("scraped_text_relative_path", "scraped_at_utc", "scrape_error"):
+        if col in df.columns:
+            df[col] = df[col].fillna("").astype(str)
     logs: list[str] = []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     done = 0
     for idx in df.index:
         if done >= max_pages:
             break
-        url = str(df.at[idx, "url"] or "").strip()
+        raw_url = df.at[idx, "url"]
+        url = "" if pd.isna(raw_url) else str(raw_url).strip()
         if not url.startswith("http"):
             continue
-        existing = str(df.at[idx, "scraped_text_relative_path"] or "").strip()
+        raw_existing = df.at[idx, "scraped_text_relative_path"]
+        existing = "" if pd.isna(raw_existing) else str(raw_existing).strip()
         if existing:
             continue
         text, err = fetch_and_extract_text(url)

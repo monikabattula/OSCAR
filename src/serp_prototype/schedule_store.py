@@ -18,6 +18,7 @@ class DashboardSchedule:
     max_results: int = 25
     output_csv: str = "out/dashboard_results.csv"
     dedupe_urls: bool = True
+    ddg_reddit_site_boost: bool = False
     last_run_utc: str | None = None
     next_run_utc: str | None = None
 
@@ -47,6 +48,7 @@ def load_schedule(project_root: Path) -> DashboardSchedule:
         max_results=int(raw.get("max_results", 25)),
         output_csv=str(raw.get("output_csv", "out/dashboard_results.csv")),
         dedupe_urls=bool(raw.get("dedupe_urls", True)),
+        ddg_reddit_site_boost=bool(raw.get("ddg_reddit_site_boost", False)),
         last_run_utc=raw.get("last_run_utc"),
         next_run_utc=raw.get("next_run_utc"),
     )
@@ -87,6 +89,7 @@ def bump_next_run(s: DashboardSchedule) -> DashboardSchedule:
         max_results=s.max_results,
         output_csv=s.output_csv,
         dedupe_urls=s.dedupe_urls,
+        ddg_reddit_site_boost=s.ddg_reddit_site_boost,
         last_run_utc=utc_now_iso(),
         next_run_utc=nxt.strftime("%Y-%m-%dT%H:%M:%SZ"),
     )
